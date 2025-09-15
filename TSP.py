@@ -267,6 +267,101 @@ class TSP:
         print("Finished computing GRASPed Outlier Insertion tour")
         return tour
     
+    def isTwoOpt(self, tour):
+        """
+        Checks whether a tour is 2-optimal.
+        A tour is 2-optimal if no 2-exchange (edge swap) improves the total length.
+
+        Parameters
+        ----------
+        tour : list[int]
+            Current tour.
+
+        Returns
+        -------
+        bool
+            True if 2-optimal, False otherwise.
+        """
+        n = len(tour)
+        best_cost = self.computeCosts(tour)
+
+        # try all 2-opt moves
+        for i in range(n - 1):
+            for j in range(i + 2, n):  
+                if i == 0 and j == n - 1:  # skip breaking the start/end edge
+                    continue
+
+                # perform 2-opt swap
+                new_tour = tour[:i + 1] + tour[i + 1:j + 1][::-1] + tour[j + 1:]
+                new_cost = self.computeCosts(new_tour)
+
+                if new_cost < best_cost:
+                    return False  # found an improving move
+
+        return True  # no improvement found
+
+    def makeTwoOpt(self, tour):
+        """
+        Applies 2-exchanges until the tour is 2-optimal.
+
+        Parameters
+        ----------
+        tour : list[int]
+            Current tour.
+
+        Returns
+        -------
+        list[int]
+            Improved 2-optimal tour.
+        """
+        n = len(tour)
+        improved = True
+        best_tour = tour
+        best_cost = self.computeCosts(best_tour)
+
+        while improved:
+            improved = False
+            for i in range(n - 1):
+                for j in range(i + 2, n):  
+                    if i == 0 and j == n - 1:  # skip invalid swap
+                        continue
+
+                    # try 2-opt swap
+                    new_tour = best_tour[:i + 1] + best_tour[i + 1:j + 1][::-1] + best_tour[j + 1:]
+                    new_cost = self.computeCosts(new_tour)
+
+                    if new_cost < best_cost:
+                        best_tour = new_tour
+                        best_cost = new_cost
+                        improved = True
+                        break  # restart search after improvement
+                if improved:
+                    break
+
+        return best_tour
+    
+    def getTour_GRASP2Opt(self, start: int, alpha_pct: float = 10.0, seed: int | None = None):
+        """
+        Construct a tour with GRASPed Outlier Insertion and improve it with 2-opt.
+
+        Parameters
+        ----------
+        start : int
+            Starting city.
+        alpha_pct : float, optional
+            α percentage for GRASP restricted candidate lists (default 10.0).
+        seed : int | None, optional
+            RNG seed forwarded to the GRASP builder.
+
+        Returns
+        -------
+        list[int]
+            2-opt–improved tour.
+        """
+        tour_before = self.getTour_GRASPedInsertion(start=start, alpha_pct=alpha_pct, seed=seed)
+        tour_after = self.makeTwoOpt(tour_before)
+        return tour_after
+    
     def getCitiesCopy(self): 
         return self.cities.copy()
         
