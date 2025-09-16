@@ -8,9 +8,15 @@ import pandas as pd
 import random
 from pathlib import Path
 from TSP import TSP
+import matplotlib.pyplot as plt
 
 BASE_SEED = 129 
 MAX_STARTS = 100
+ALPHA_PCT  = 10  # α% for GRASP RCLs
+
+# where to save figures/CSV
+OUT_DIR = Path("fig_grasp2opt_small")
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def select_instances(base_dir="Instances", n_small=5, n_medium=3, n_large=2, seed=BASE_SEED):
     """
@@ -72,7 +78,7 @@ def choose_starts(n: int, file_path: Path, max_starts: int = MAX_STARTS, base_se
     rng = random.Random(seed)
     return rng.sample(range(n), max_starts)
 
-def get_stats(costs):
+def stats(costs: list[float]):
     """
     Compute summary statistics from a list of tour costs
 
@@ -94,40 +100,47 @@ def get_stats(costs):
         - cv_cost : float
             coefficient of variation (std/mean)
     """
-    min_cost = np.min(costs)
-    mean_cost = np.mean(costs)
-    var_cost = np.var(costs, ddof=1) 
-    std_cost = np.std(costs, ddof=1)
-    cv_cost = std_cost / mean_cost if mean_cost > 0 else 0.0 #prevents division by 0
-    return min_cost, mean_cost, var_cost, cv_cost
+    costs = np.asarray(costs, dtype=float)
+    min_c  = float(np.min(costs))
+    mean_c = float(np.mean(costs))
+    var_c  = float(np.var(costs, ddof=1)) if costs.size > 1 else 0.0
+    std_c  = float(np.std(costs, ddof=1)) if costs.size > 1 else 0.0
+    cv_c   = (std_c / mean_c) if mean_c > 0 else 0.0
+    return min_c, mean_c, var_c, cv_c
 
-def run_instance(file_path: Path):
-    """
-    Run the Outlier Insertion + 2-opt heuristics on a single instance for multiple start cities
+def scatter_xy(fig_path: Path, xs: np.ndarray, ys: np.ndarray, title: str):
+    plt.figure(figsize=(7.5, 5.5), dpi=140)
+    plt.scatter(xs, ys, s=22, facecolors="none", edgecolors="#1f77b4", linewidths=1.0)
+    lo, hi = min(xs.min(), ys.min()), max(xs.max(), ys.max())
+    plt.plot([lo, hi], [lo, hi], "--", color="gray", linewidth=1)  # y=x reference
+    plt.xlabel("Constructive heuristic — GRASP cost (before 2-opt)")
+    plt.ylabel("After local search — GRASP + 2-opt cost")
+    plt.title(title)
+    plt.tight_layout()
+    plt.savefig(fig_path)
+    plt.close()
 
-    Parameters
-    ----------
-    file_path : path
-        path to the .tsp instance file
+def run_instance(path: Path):
+    tsp = TSP(str(path))
+    starts = choose_starts(tsp.nCities, path)
 
-    Returns
-    -------
-    tuple
-        statistics (min_cost, mean_cost, var_cost, cv_cost) over all starts
-    """
-    #get the number of cities (DIMENSIONS) of the instance
-    tsp = TSP(str(file_path))
-    n = tsp.nCities 
+    # tie seed to (instance, alpha) and vary by start index for reproducibility
+    base = (hash(path.as_posix()) ^ (ALPHA_PCT * 1009) ^ BASE_SEED) & 0xFFFFFFFF
 
-    starts = choose_starts(n, file_path) #get list of start cities
+    before_costs, after_costs = [], []
+    for k, s in enumerate(starts):
+        # cost BEFORE local search (pure GRASP)
+        tour_before = tsp.getTour_GRASPedInsertion(start=s, alpha_pct=ALPHA_PCT, seed=base + k)
+        c_before = tsp.computeCosts(tour_before)
 
-    costs = []
-    for s in starts:
-        tour = tsp.getTour_OutlierInsertion(s) #build initial tour with the Outlier Insertion heuristic
-        improved_tour = tsp.makeTwoOpt(tour) #improve the tour with the 2-opt heuristic
-        cost = tsp.computeCosts(improved_tour)
-        costs.append(cost)
-    return get_stats(costs)
+        # cost AFTER local search (GRASP + 2-opt) via your new method
+        tour_after = tsp.getTour_GRASP2Opt(start=s, alpha_pct=ALPHA_PCT, seed=base + k)
+        c_after = tsp.computeCosts(tour_after)
+
+        before_costs.append(c_before)
+        after_costs.append(c_after)
+
+    return np.array(before_costs), np.array(after_costs)
 
 def main():
     picked = select_instances(seed=BASE_SEED)
@@ -136,20 +149,26 @@ def main():
     rows = []
     for fpath in instance_paths:
         fpath = Path(fpath)
-        print(f"Running {fpath}...")
-        min_cost, mean_cost, var_cost, cv_cost = run_instance(fpath)
+        print(f"Running {fpath} …")
+        xs, ys = run_instance(fpath)
+
+        fig_path = OUT_DIR / f"{fpath.stem}_grasp2opt.png"
+        scatter_xy(fig_path, xs, ys, f"{fpath.name} — GRASP(α={ALPHA_PCT}%) + 2-opt")
+
+        min_c, mean_c, var_c, cv_c = stats(list(ys))
         rows.append({
             "Instance": fpath.name,
-            "Min Cost": round(float(min_cost), 2),
-            "Mean Cost": round(float(mean_cost), 2),
-            "Variance": round(float(var_cost), 2),
-            "CV": round(float(cv_cost), 3),
+            "Min Cost": round(min_c, 2),
+            "Mean Cost": round(mean_c, 2),
+            "Variance": round(var_c, 2),
+            "CV": round(cv_c, 3),
         })
 
     df = pd.DataFrame(rows)
-    print(f"\nResults Exercise 5, with {MAX_STARTS} starts")
+    print("\n=== RESULTS TABLE (GRASP + 2-Opt, Selected Instances) ===")
     print(df.to_string(index=False))
-    df.to_csv("exercise_5.csv", index=False)
+    df.to_csv(OUT_DIR / "grasp2opt_stats.csv", index=False)
+    print(f"\nSaved figures & CSV to: {OUT_DIR}/")
 
 if __name__ == "__main__":
     main()
