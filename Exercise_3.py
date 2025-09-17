@@ -9,8 +9,8 @@ import random
 from pathlib import Path
 from TSP import TSP
 
-BASE_SEED = 129  
-MAX_STARTS = 100
+BASE_SEED = 131  
+MAX_STARTS = 10
 
 def select_instances(base_dir="Instances", n_small=5, n_medium=3, n_large=2, seed=BASE_SEED):
     """
@@ -34,16 +34,13 @@ def select_instances(base_dir="Instances", n_small=5, n_medium=3, n_large=2, see
     dict
         keys Small, Medium, Large and values that are lists of file paths to the selected .tsp instances
     """
-    import os, random
-    random.seed(seed)
+    random.seed(seed) #ensures reproducibility where the same instances are picked each run
     selected = {}
     for group, n_pick in (("Small", n_small), ("Medium", n_medium), ("Large", n_large)):
         folder = os.path.join(base_dir, group)
-        pool = sorted(f for f in os.listdir(folder) if f.endswith(".tsp"))
-        if n_pick > len(pool):
-            raise ValueError(f"Requested {n_pick} {group}, but only {len(pool)} available.")
-        chosen = random.sample(pool, n_pick)
-        selected[group] = [os.path.join(folder, f) for f in chosen]
+        pool = sorted(f for f in os.listdir(folder) if f.endswith(".tsp")) #collect all available .tsp files in this group
+        chosen = random.sample(pool, n_pick) #pick exactly n_pick instances at random
+        selected[group] = [os.path.join(folder, f) for f in chosen] #store the paths so they can be used later
     return selected
 
 def choose_starts(n: int, file_path: Path, max_starts: int = MAX_STARTS, base_seed: int = BASE_SEED):
@@ -66,9 +63,11 @@ def choose_starts(n: int, file_path: Path, max_starts: int = MAX_STARTS, base_se
     list of int
         selected start cities
     """
+    #for small instances, use all cities as start points
     if n <= max_starts:
         return list(range(n))
-    seed = (hash(file_path.as_posix()) ^ base_seed) & 0xFFFFFFFF
+    
+    seed = (hash(file_path.as_posix()) ^ base_seed) & 0xFFFFFFFF #combine file path and base seed to get an instance-specific seed
     rng = random.Random(seed)
     return rng.sample(range(n), max_starts)
 
@@ -96,10 +95,9 @@ def get_stats(costs):
     """
     min_cost = np.min(costs)
     mean_cost = np.mean(costs)
-    var_cost = np.var(costs, ddof=1) 
     std_cost = np.std(costs, ddof=1)
     cv_cost = std_cost / mean_cost if mean_cost > 0 else 0.0 #prevents division by 0
-    return min_cost, mean_cost, var_cost, cv_cost
+    return min_cost, mean_cost, std_cost, cv_cost
 
 def run_instance(file_path: Path):
     """
@@ -125,26 +123,33 @@ def run_instance(file_path: Path):
     costs = []
     for s in starts:
         tour = tsp.getTour_OutlierInsertion(s)
+        tsp.evaluateSolution(tour)
         cost = tsp.computeCosts(tour)
         costs.append(cost)
     return get_stats(costs)
 
 def main():
+    """
+    Main entry point. Selects 5 small, 3 medium, and 2 large instances reproducibly, runs the Outlier Insertion heuristic with up to MAX_STARTS different starts per instance, and prints a summary results table
+    """
     picked = select_instances(seed=BASE_SEED)
     instance_paths = picked["Small"] + picked["Medium"] + picked["Large"]
 
+    #run the Outlier Insertion heuristic for the instances and collect the statistics
     rows = []
     for fpath in instance_paths:
         fpath = Path(fpath)
         print(f"Running {fpath}")
-        min_cost, mean_cost, var_cost, cv_cost = run_instance(fpath)
+        min_cost, mean_cost, std_cost, cv_cost = run_instance(fpath)
         rows.append({
             "Instance": fpath.name,
-            "Min Cost": round(float(min_cost), 2),
-            "Mean Cost": round(float(mean_cost), 2),
-            "Variance": round(float(var_cost), 2),
-            "CV": round(float(cv_cost), 3),
+            "Min. Obj.": round(float(min_cost), 2),
+            "Mean. Obj.": round(float(mean_cost), 2),
+            "St. Dev.": round(float(std_cost), 2),
+            "Cof. Var.": round(float(cv_cost), 3),
         })
+
+    #convert results to a DataFrame for printing and .csv
     df = pd.DataFrame(rows)
     print(f"\nResults Exercise 3, with {MAX_STARTS} starts")
     print(df.to_string(index=False))

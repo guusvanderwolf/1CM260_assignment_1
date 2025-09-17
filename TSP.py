@@ -3,9 +3,11 @@
 @author: Guus van der Wolf
 """
 
-import numpy as np
-import math   
 import os
+import numpy as np
+import pandas as pd
+import random
+import math   
 
 
 class Point2D: 
@@ -116,231 +118,190 @@ class TSP:
 
         return tour
 
-    # ========= deterministic Outlier Insertion =========
     def getTour_OutlierInsertion(self, start):
         """
-        Construct a tour using the Outlier Insertion heuristic.
-
-        The method starts from an initial city and iteratively inserts the
-        candidate city that is "furthest" from the current partial tour
-        (the outlier). At each step, the city is inserted at the position
-        in the tour that yields the smallest increase in cost.
+        Construct a tour using the Outlier Insertion heuristic. Starts from an initial city and iteratively inserts the candidate city that is "furthest" from the current partial tour (the outlier). At each step, the city is inserted at the position in the tour that yields the smallest increase in cost
 
         Parameters
         ----------
         start : int
-            Index of the starting city.
+            starting point of the tour
 
         Returns
         -------
-        list of int
-            A complete tour (list of city indices), beginning with `start`.
+        tour : list of ints
+            order in which the cities are visitied
         """
         tour = [start]
+
+        #create the set of cities that are not yet in the tour (all except the start city)
         notInTour = self.cities.copy()
         notInTour.remove(start)
 
         print("Start computing Outlier Insertion tour")
 
-        # first extension: furthest from start
+        #add the city furthest from the start city to the tour
         first = self.furthest_city(notInTour, [start])
         tour.append(first)
         notInTour.remove(first)
 
-        # iterative insertions
+        #add the outlier city iteratively to the tour
         while notInTour:
             candidate = self.furthest_city(notInTour, tour)
-            pos, _ = self.best_insertion_position(tour, candidate)
+            pos = self.best_insertion_position(tour, candidate) #find best insertion position
             tour.insert(pos, candidate)
             notInTour.remove(candidate)
 
         print("Finished computing Outlier Insertion tour")
         return tour
 
-    # ========= GRASP'ed Outlier Insertion (randomized both steps) =========
     def getTour_GRASPedInsertion(self, start, alpha_pct=10.0, seed=None):
         """
-        GRASP version of Outlier Insertion that randomizes *both* steps using an α% rule.
+        GRASP version of Outlier Insertion that randomizes both steps using an α% rule. 
 
         Parameters
         ----------
         start : int
-            starting city
+            starting point of the tour
         alpha_pct : float
-            α in percent (e.g., 10 means 'within 10% of the best'):
-            - City selection (maximize): choose uniformly at random among cities whose
-              'distance to nearest tour city' ≥ (1-α) * bestScore.
-            - Position selection (minimize): choose uniformly among positions whose
-              insertion increase ≤ (1+α) * bestIncrease.
-        seed : int | None
-            RNG seed for reproducibility.
+            α in percent
+        seed : int
+            RNG seed for reproducibility
 
         Returns
         -------
-        tour : list[int]
+        tour : list of ints
+            order in which the cities are visitied
         """
-        import random
-        rng = random.Random(seed)
-        alpha = float(alpha_pct) / 100.0
-
+        rng = random.Random(seed) #initialize RNG
         tour = [start]
+
+        #create the set of cities that are not yet in the tour (all except the start city)
         notInTour = self.cities.copy()
         notInTour.remove(start)
 
-        print("Start computing GRASPed Outlier Insertion tour")
+        print(f"Start computing GRASP Outlier Insertion tour (alpha={alpha_pct}%)")
 
-        # ---- first extension: furthest from start with α-RCL ----
-        # scores = distance to start
-        scores = {c: self.distMatrix[start][c] for c in notInTour}
-        bestScore = max(scores.values())
-        thr_city = (1.0 - alpha) * bestScore
-        rcl_cities = [c for c, s in scores.items() if s >= thr_city]
-        first = rng.choice(rcl_cities)
+        #add the city furthest from the start city to the tour
+        first = self.furthest_city(notInTour, [start])
         tour.append(first)
         notInTour.remove(first)
 
-        # ---- iterative insertions: randomize city & position with α-RCLs ----
+        #add the outlier city iteratively to the tour
         while notInTour:
-            # CITY RCL (maximize nearest-to-tour distance)
-            scores = {c: self.nearest_dist_to_tour(c, tour) for c in notInTour}
-            bestScore = max(scores.values())
-            thr_city = (1.0 - alpha) * bestScore
-            rcl_city = [c for c, s in scores.items() if s >= thr_city]
-            city = rng.choice(rcl_city)
+            scores = [(c, self.nearest_dist_to_tour(c, tour)) for c in notInTour] #compute outlier score for each candidate, which is the distance to the nearest city in current tour
+            scores.sort(key=lambda x: x[1], reverse=True) #sort candidates descending by score (highest outlier score first)
+            rcl_size = max(1, int(len(scores) * alpha_pct / 100)) #determine size of the RCL (at least 1 candidate)
+            candidate = rng.choice(scores[:rcl_size])[0] #pick one candidate at random from the RCL
+            pos = self.best_insertion_position(tour, candidate) #find best insertion position
+            tour.insert(pos, candidate)
+            notInTour.remove(candidate)
 
-            # POSITION RCL (minimize insertion increase)
-            # gather all positions and best increase
-            m = len(tour)
-            opts = []
-            bestInc = None
-            for k in range(m):
-                i, j = tour[k], tour[(k + 1) % m]
-                inc = (self.distMatrix[i][city]
-                       + self.distMatrix[city][j]
-                       - self.distMatrix[i][j])
-                opts.append((k + 1, inc))
-                if bestInc is None or inc < bestInc:
-                    bestInc = inc
-            thr_pos = (1.0 + alpha) * bestInc
-            rcl_pos = [pos for (pos, inc) in opts if inc <= thr_pos]
-            pos = rng.choice(rcl_pos)
-
-            tour.insert(pos, city)
-            notInTour.remove(city)
-
-        print("Finished computing GRASPed Outlier Insertion tour")
+        print("Finished computing GRASP Outlier Insertion tour")
         return tour
     
     def isTwoOpt(self, tour, eps=1e-12):
         """
-        Checks whether a tour is 2-optimal.
-
-        A tour is 2-optimal if no pair of edges can be replaced by two other edges
-        such that the total tour cost is reduced.
-
-        For large instances (DIMENSION > 1379), the second arc is restricted to
-        candidates where one endpoint is among the 40 nearest neighbors of either
-        endpoint of the first arc. This speeds up the check significantly.
+        Checks whether a tour is 2-optimal. A tour is 2-optimal if no pair of edges can be replaced by two other edges such that the total tour cost is reduced. For large instances (DIMENSION > 1379), the second arc is restricted to candidates where one endpoint is among the 40 nearest neighbors of either endpoint of the first arc
 
         Parameters
         ----------
-        tour : list of int
-            Order in which cities are visited. Example: [0, 2, 1, 3].
-        eps : float, optional
-            Tolerance value. Small numerical gains below eps are ignored.
+        tour : list of ints
+            current order in which the cities are visitied
+        eps : float
+            tolerance value, where small numerical gains below eps are ignored
 
         Returns
         -------
         bool
-            True if the tour is 2-optimal (cannot be improved by any 2-exchange),
-            False otherwise.
+            True if the tour is 2-optimal, False otherwise
         """
+        #check if the tours has less than 4 cities, becasue these are trivially 2-optimal
         n = len(tour)
         if n < 4:
             return True
 
-        large = (self.nCities > 1379) # For large instances, only consider the 40 nearest neighbors
+        #consider the 40 nearest neighbors for large instances
+        large = (self.nCities > 1379)
         if large:
-            self._ensure_nn_lists(k=40)
-            # position map for O(1) index lookup
-            pos = {city: idx for idx, city in enumerate(tour)}
+            self.ensure_nn_lists(k=40)
+            pos = {city: idx for idx, city in enumerate(tour)} #build a position map for O(1) lookup of city positions in the tour
 
+        #try each edge (i, i+1) in the tour
         for i in range(n - 1):
             if large:
-                a, b = tour[i], tour[(i + 1) % n]
+                a, b = tour[i], tour[(i + 1) % n] #ensures that when i is the last index, it loops back to 0
                 cand_js = set()
 
-                # if city v is a neighbor of a or b, then an eligible second edge
-                # is the edge starting at index j where v == tour[j] (or j-1).
-                for v in self._nn_lists[a] + self._nn_lists[b]:
+                #build candidate j indices from neighbors of a and b
+                for v in self.nn_lists[a] + self.nn_lists[b]:
                     j = pos.get(v)
                     if j is None:
                         continue
                     cand_js.add(j)
                     if j - 1 >= 0:
                         cand_js.add(j - 1)
-                # filter and check candidates
+                
+                #check each candidate edge (j, j+1)
                 for j in sorted(cand_js):
-                    if j <= i + 1:
+                    if j <= i + 1: #ensures edges do not overlap
                         continue
-                    if i == 0 and j == n - 1:  # skip closing edge as pair
+                    if i == 0 and j == n - 1: #skip case where we would break the closing edge of the tour
                         continue
-                    if self._two_opt_gain(tour, i, j) > eps:
-                        return False
+                    if self.two_opt_gain(tour, i, j) > eps:
+                        return False #found an improving 2-opt move
             else:
-                # full neighborhood
-                for j in range(i + 2, n):
-                    if i == 0 and j == n - 1: # Skip case where we would "break" the closing edge of the tour
+                #full neighborhood, check all pairs (i, j)
+                for j in range(i + 2, n): 
+                    if i == 0 and j == n - 1: #skip case where we would break the closing edge of the tour
                         continue
-                    if self._two_opt_gain(tour, i, j) > eps:
-                        return False
-        return True
+                    if self.two_opt_gain(tour, i, j) > eps:
+                        return False #found an improving 2-opt move
+        return True #found no improving 2-opt move
 
     def makeTwoOpt(self, tour, first_improvement=True, eps=1e-12):
         """
-        Applies 2-opt local search to a given tour until it is 2-optimal.
-
-        The algorithm repeatedly checks whether replacing two edges with two
-        different edges reduces the cost. If so, the segment between the edges
-        is reversed. The process stops once no further improvement is possible.
-
-        For large instances (DIMENSION > 1379), the second arc is restricted to
-        candidates where one endpoint is among the 40 nearest neighbors of either
-        endpoint of the first arc.
+        Applies 2-opt local search to a given tour until it is 2-optimal. For large instances (DIMENSION > 1379), the second arc is restricted to candidates where one endpoint is among the 40 nearest neighbors of either endpoint of the first arc
 
         Parameters
         ----------
-        tour : list of int
-            Initial tour to be improved. Example: [0, 2, 1, 3].
-        first_improvement : bool, optional
-            If True, stop after the first improving move per iteration.
-            If False, apply the best possible move in each iteration.
-        eps : float, optional
-            Tolerance value. Small numerical gains below eps are ignored.
+        tour : list of ints
+            current order in which the cities are visitied
+        first_improvement : bool
+            - if True, stop after the first improving move per iteration
+            - if False, apply the best possible move in each iteration
+        eps : float
+            tolerance value, where small numerical gains below eps are ignored
 
         Returns
         -------
-        list of int
-            The improved tour that is 2-optimal under the given neighborhood definition.
+        tour : list of ints
+            order in which the cities are visitied
         """
+        #check if the tours has less than 4 cities, becasue these are trivially 2-optimal
         n = len(tour)
         if n < 4:
             return tour
 
+        #consider the 40 nearest neighbors for large instances
         large = (self.nCities > 1379)
         if large:
-            self._ensure_nn_lists(k=40)
+            self.ensure_nn_lists(k=40)
+            pos = {city: idx for idx, city in enumerate(tour)} #build a position map for O(1) lookup of city positions in the tour
 
+        #set initial values
         improved = True
         while improved:
             improved = False
-            # rebuild position map at the start of each pass (tour may change)
-            pos = {city: idx for idx, city in enumerate(tour)}
+            best_gain, best_i, best_j = 0.0, None, None
 
+            #try each edge (i, i+1) in the tour
             for i in range(n - 1):
                 if large:
-                    a, b = tour[i], tour[(i + 1) % n]
+                    a, b = tour[i], tour[(i + 1) % n] #ensures that when i is the last index, it loops back to 0
                     cand_js = set()
+
+                    #build candidate j indices from neighbors of a and b
                     for v in self._nn_lists[a] + self._nn_lists[b]:
                         j = pos.get(v)
                         if j is None:
@@ -348,24 +309,47 @@ class TSP:
                         cand_js.add(j)
                         if j - 1 >= 0:
                             cand_js.add(j - 1)
-                    iter_js = sorted(cand_js)
-                else:
-                    iter_js = range(i + 2, n)
 
-                for j in iter_js:
-                    if j <= i + 1:
-                        continue
-                    if i == 0 and j == n - 1:
-                        continue
-                    gain = self._two_opt_gain(tour, i, j)
-                    if gain > eps:
-                        # accept: reverse segment (i+1 .. j)
-                        tour[i + 1:j + 1] = reversed(tour[i + 1:j + 1]) # Reverse the segment between i+1 and j (inclusive)
-                        improved = True
-                        if first_improvement:
-                            break
+                    #check each candidate edge (j, j+1)
+                    for j in sorted(cand_js):
+                        if j <= i + 1:  #ensures edges do not overlap
+                            continue
+                        if i == 0 and j == n - 1:  #skip case where we would break the closing edge of the tour
+                            continue
+
+                        gain = self._two_opt_gain(tour, i, j)
+                        if gain > eps:
+                            if first_improvement:
+                                tour[i + 1:j + 1] = reversed(tour[i + 1:j + 1]) #apply the reverse move
+                                improved = True
+                                break
+
+                            #track the best move to apply later
+                            elif gain > best_gain:
+                                best_gain, best_i, best_j = gain, i, j
+
+                else:
+                    #full neighborhood, check all pairs (i, j)
+                    for j in range(i + 2, n):
+                        if i == 0 and j == n - 1:  #skip case where we would break the closing edge of the tour
+                            continue
+                        gain = self._two_opt_gain(tour, i, j)
+                        if gain > eps:
+                            if first_improvement:
+                                tour[i + 1:j + 1] = reversed(tour[i + 1:j + 1])
+                                improved = True
+                                break
+                            elif gain > best_gain:
+                                best_gain, best_i, best_j = gain, i, j
+
                 if improved and first_improvement:
-                    break
+                    break #restart search after applying a move
+
+            #apply the best move found in this iteration
+            if not first_improvement and best_gain > eps:
+                tour[best_i + 1:best_j + 1] = reversed(tour[best_i + 1:best_j + 1])
+                improved = True
+
         return tour
     
     def getTour_GRASP2Opt(self, start: int, alpha_pct: float = 10.0, seed: int | None = None):
@@ -375,170 +359,170 @@ class TSP:
         Parameters
         ----------
         start : int
-            Starting city.
-        alpha_pct : float, optional
-            α percentage for GRASP restricted candidate lists (default 10.0).
-        seed : int | None, optional
-            RNG seed forwarded to the GRASP builder.
+            starting point of the tour
+        alpha_pct : float
+            α in percent (default 10.0)
+        seed : int
+            RNG seed for reproducibility
 
         Returns
         -------
-        list[int]
-            2-opt–improved tour.
+        tour_after : list of ints
+            order in which the cities are visitied
         """
+        #run the GRASPed Outlier Insertion heuristic followed by the 2-opt heuristic
         tour_before = self.getTour_GRASPedInsertion(start=start, alpha_pct=alpha_pct, seed=seed)
         tour_after = self.makeTwoOpt(tour_before)
         return tour_after
     
     def best_insertion_position(self, tour, city):
         """
-        Find the best position in a tour to insert a new city.
-
-        The position is chosen such that the increase in tour cost is minimized.
-        The method evaluates all possible insertion edges (i, i+1) in the
-        current tour, computes the cost of inserting the city between them,
-        and selects the best option.
+        Find the best position in a tour to insert a new city. The position is chosen such that the increase in tour cost is minimized
 
         Parameters
         ----------
-        tour : list of int
-            Current partial tour (sequence of cities).
+        tour : list of ints
+            current partial tour
         city : int
-            Index of the city to insert into the tour.
+            index of the city to insert into the tour
 
         Returns
         -------
-        tuple of (int, float)
-            The best insertion position (index where the city should be inserted)
-            and the corresponding increase in cost.
+        best_pos : tuple of (int, float)
+            the best insertion position and the corresponding increase in cost
         """
-        bestPos = 0
-        bestIncrease = None
-        m = len(tour)
-        for k in range(m):
-            i = tour[k]
-            j = tour[(k + 1) % m]
-            increase = (self.distMatrix[i][city]
-                        + self.distMatrix[city][j]
-                        - self.distMatrix[i][j])
-            if bestIncrease is None or increase < bestIncrease:
-                bestIncrease = increase
-                bestPos = k + 1
-        return bestPos, bestIncrease
+        best_pos = None
+        best_increase = float("inf")
+
+        #try to insert the city between every consecutive pair of cities (i, j)
+        for i in range(len(tour)):
+            j = (i + 1) % len(tour) #ensure last city is paired with the first city to keep the tour circular
+
+            #compute the added cost of breaking the edge (i, j) and replacing it with the edges (i, city) and (city, j)
+            increase = (self.distMatrix[tour[i]][city] + self.distMatrix[city][tour[j]] - self.distMatrix[tour[i]][tour[j]])
+
+            #keep track of the insertion position with the lowest added cost
+            if increase < best_increase:
+                best_increase = increase
+                best_pos = j
+
+        return best_pos
     
     def nearest_dist_to_tour(self, city, tour):
         """
-        Compute the distance from a city to its nearest neighbor in a given tour.
+        Compute the distance from a city to its nearest neighbor in a given tour
 
         Parameters
         ----------
         city : int
-            Index of the city for which we want the distance.
-        tour : list of int
-            Sequence of cities forming the current tour.
+            index of the city for which we want the distance
+        tour : list of ints
+            current order in which the cities are visitied
 
         Returns
         -------
         float
-            Distance from `city` to the closest city in `tour`.
+            distance from the city to the closest city in tour
         """
         best = None
+
+        #check the distance from the city to every city in the current tour
         for i in tour:
             d = self.distMatrix[city][i]
-            if best is None or d < best:
+            #update best if this is the first distance computed or if we found a shorter distance
+            if best is None or d < best: 
                 best = d
         return best
 
     def furthest_city(self, candidates, from_set):
         """
-        Find the city among the candidates that is furthest from the given set.
-
-        The "distance" of a candidate city is defined as its distance to the
-        *nearest* city in `from_set`. The city maximizing this value is returned.
+        Find the city among the candidates that is furthest from the given set
 
         Parameters
         ----------
-        candidates : list of int
-            Cities that can be chosen from.
-        from_set : list of int
-            Set of cities already in the tour.
+        candidates : list of ints
+            cities that can be chosen from
+        from_set : list of ints
+            set of cities already in the tour
 
         Returns
         -------
-        int
-            The city in `candidates` with the largest minimum distance to `from_set`.
+        furhestCity : int
+            the city from candidates that is the furthest from from_set
         """
+        #set initial values
         furthestCity = None
         furthestDist = -1.0
+
         for c in candidates:
-            # distance to *nearest* city already in from_set
+            #compute distance from c to its nearest neighbor in from_set
             nearest = None
             for i in from_set:
                 d = self.distMatrix[c][i]
                 if nearest is None or d < nearest:
                     nearest = d
+            #update if this candidate is further than previous best        
             if nearest > furthestDist:
                 furthestDist = nearest
                 furthestCity = c
+
         return furthestCity
     
-    def _two_opt_gain(self, tour, i, j):
+    def two_opt_gain(self, tour, i, j):
         """
-        Computes the change in tour length for a 2-opt move that reverses
-        the segment (i+1 .. j).
-
-        The move replaces edges (tour[i], tour[i+1]) and (tour[j], tour[j+1])
-        by (tour[i], tour[j]) and (tour[i+1], tour[j+1]). The gain is computed
-        in O(1) by touching only these four edges.
+        Computes the change in tour length for a 2-opt move that reverses the segment (i+1 .. j)
 
         Parameters
         ----------
-        tour : list of int
-            Current tour; tour[t] gives the city at position t (tour is circular).
+        tour : list of ints
+            current order in which the cities are visitied
         i : int
-            Index of the first edge (i, i+1) in the tour.
+            index of the first edge (i, i+1) in the tour
         j : int
-            Index of the second edge (j, j+1) in the tour, with j >= i + 2.
+            index of the second edge (j, j+1) in the tour
 
         Returns
         -------
-        float
-            Gain = (removed length) − (added length).
-            A positive value means the swap improves the tour.
+        gain: float
+            gain = removed length − added length. 
         """
         n = len(tour)
-        a, b = tour[i], tour[(i + 1) % n]
-        c, d = tour[j], tour[(j + 1) % n]
-        removed = self.distMatrix[a][b] + self.distMatrix[c][d]
-        added   = self.distMatrix[a][c] + self.distMatrix[b][d]
-        return removed - added  # > 0 ⇒ improvement
 
-    def _ensure_nn_lists(self, k=40):
+        #find the endpoints of the two edges to break (a,b) and (c,d)
+        a = tour[i]
+        b = tour[(i + 1) % n]  #ensures the tour is circular
+        c = tour[j]
+        d = tour[(j + 1) % n]
+
+        removed = self.distMatrix[a][b] + self.distMatrix[c][d] #compute the total length of edges removed by the 2-opt swap
+        added = self.distMatrix[a][c] + self.distMatrix[b][d] #compute the total length of edges added after reconnecting
+
+        return removed - added
+
+    def ensure_nn_lists(self, k=40):
         """
-        Precomputes (and caches) k nearest neighbors per city (excluding the city itself).
-
-        The result is stored in self._nn_lists so it can be reused by 2-opt routines.
-        If the cache already exists with the requested k, it is reused.
+        Precomputes (and caches) the k nearest neighbors per city (excluding the city itself)
 
         Parameters
         ----------
-        k : int, optional
-            Number of nearest neighbors to keep for each city (default 40).
+        k : int
+            number of nearest neighbors to keep for each city (default 40)
 
         Returns
         -------
-        list[list[int]]
-            Neighbor lists; self._nn_lists[u] contains the k closest cities to city u,
-            ordered from closest to farthest.
+        self.nn_lists : list[list[int]]
+            neighbor lists which contains the k closest cities to city u, ordered from closest to farthest
         """
-        if getattr(self, "_nn_lists", None) is not None and len(self._nn_lists[0]) == k:
-            return
+        #reuse the cached neighbor lists if they exist and have size k
+        if getattr(self, "nn_lists", None) is not None and len(self.nn_lists[0]) == k:
+            return self.nn_lists
+        
         n = self.nCities
-        self._nn_lists = []
+        self.nn_lists = []
         for i in range(n):
-            order = np.argsort(self.distMatrix[i]) # Sort distances from city i (ascending)
-            order = [j for j in order if j != i][:k] # Drop self and keep first k
-            self._nn_lists.append(order)
+            order = np.argsort(self.distMatrix[i]) #sort all cities by distance from city i (ascending order)
+            order = [j for j in order if j != i][:k] #remove i, then keep only the first k closest cities
+            self.nn_lists.append(order) #store the k nearest neighbors for city i
     
     def getCitiesCopy(self): 
         return self.cities.copy()
