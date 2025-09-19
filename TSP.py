@@ -157,7 +157,7 @@ class TSP:
 
     def getTour_GRASPedInsertion(self, start, alpha_pct=10.0, seed=None):
         """
-        GRASP version of Outlier Insertion that randomizes both steps using an α% rule. 
+        GRASP version of Outlier Insertion that randomizes the outlier selection step using an α% rule. 
 
         Parameters
         ----------
@@ -261,7 +261,7 @@ class TSP:
 
     def makeTwoOpt(self, tour, first_improvement=True, eps=1e-12):
         """
-        Applies 2-opt local search to a given tour until it is 2-optimal. For large instances (DIMENSION > 1379), the second arc is restricted to candidates where one endpoint is among the 40 nearest neighbors of either endpoint of the first arc
+        Applies 2-opt local search to a given tour until it is 2-optimal. For large instances (DIMENSION > 1379), the second arc is restricted to candidates where one endpoint is among the 40 nearest neighbors of either endpoint of the first arc.
 
         Parameters
         ----------
@@ -302,7 +302,7 @@ class TSP:
                     cand_js = set()
 
                     #build candidate j indices from neighbors of a and b
-                    for v in self._nn_lists[a] + self._nn_lists[b]:
+                    for v in self.nn_lists[a] + self.nn_lists[b]:
                         j = pos.get(v)
                         if j is None:
                             continue
@@ -317,7 +317,7 @@ class TSP:
                         if i == 0 and j == n - 1:  #skip case where we would break the closing edge of the tour
                             continue
 
-                        gain = self._two_opt_gain(tour, i, j)
+                        gain = self.two_opt_gain(tour, i, j)
                         if gain > eps:
                             if first_improvement:
                                 tour[i + 1:j + 1] = reversed(tour[i + 1:j + 1]) #apply the reverse move
@@ -333,7 +333,7 @@ class TSP:
                     for j in range(i + 2, n):
                         if i == 0 and j == n - 1:  #skip case where we would break the closing edge of the tour
                             continue
-                        gain = self._two_opt_gain(tour, i, j)
+                        gain = self.two_opt_gain(tour, i, j)
                         if gain > eps:
                             if first_improvement:
                                 tour[i + 1:j + 1] = reversed(tour[i + 1:j + 1])
@@ -352,7 +352,7 @@ class TSP:
 
         return tour
     
-    def getTour_GRASP2Opt(self, start: int, alpha_pct: float = 10.0, seed: int | None = None):
+    def getTour_GRASP2Opt(self, start, alpha_pct = 10.0, seed=None):
         """
         Construct a tour with GRASPed Outlier Insertion and improve it with 2-opt.
 
@@ -579,7 +579,7 @@ class TSP:
         for i in range(len(tour)-1):
             costs += self.distMatrix[tour[i],tour[i+1]]
             
-        # add the costs to complete the tour back to the start
+        #add the costs to complete the tour back to the start
         costs += self.distMatrix[tour[-1],tour[0]]
         return costs
     

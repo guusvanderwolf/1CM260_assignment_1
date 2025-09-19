@@ -19,7 +19,7 @@ def select_instances(base_dir="Instances", n_small=5, n_medium=3, n_large=2, see
     Parameters
     ----------
     base_dir : str
-        path to the base directory containing 'Small', 'Medium', and 'Large' subfolders
+        path to the base directory containing Small, Medium, and Large subfolders
     n_small : int
         number of small instances to select (default 5)
     n_medium : int
@@ -43,7 +43,7 @@ def select_instances(base_dir="Instances", n_small=5, n_medium=3, n_large=2, see
         selected[group] = [os.path.join(folder, f) for f in chosen] #store the paths so they can be used later
     return selected
 
-def choose_starts(n: int, file_path: Path, max_starts: int = MAX_STARTS, base_seed: int = BASE_SEED):
+def choose_starts(n, file_path, max_starts = MAX_STARTS, base_seed = BASE_SEED):
     """
     Select up to MAX_STARTS distinct start cities for an instance. If the number of cities is less than or equal to MAX_STARTS, all start cities are used.
 
@@ -99,7 +99,7 @@ def get_stats(costs):
     cv_cost = std_cost / mean_cost if mean_cost > 0 else 0.0 #prevents division by 0
     return min_cost, mean_cost, std_cost, cv_cost
 
-def run_instance(file_path: Path):
+def run_instance(file_path):
     """
     Run the NN heuristic on a single instance for multiple start cities
 
@@ -130,7 +130,7 @@ def run_instance(file_path: Path):
 
 def main():
     """
-    Main entry point. Selects 5 small, 3 medium, and 2 large instances reproducibly, runs the NN heuristic with up to MAX_STARTS different starts per instance, and prints a summary results table
+    Main entry point. Selects 5 small, 3 medium, and 2 large instances reproducibly, runs the NN heuristic with up to MAX_STARTS different starts per instance, and prints a summary results table.
     """
     picked = select_instances()
     instance_paths = picked["Small"] + picked["Medium"] + picked["Large"]

@@ -11,7 +11,7 @@ from TSP import TSP
 import matplotlib.pyplot as plt
 
 BASE_SEED = 131 
-MAX_STARTS = 10
+STARTS_BY_GROUP = {"Small": 20, "Medium": 10, "Large": 5}
 ALPHA  = 10  #α in percent
 
 #where to save the figure and CSV
@@ -49,7 +49,7 @@ def select_instances(base_dir="Instances", n_small=5, n_medium=3, n_large=2, see
         selected[group] = [os.path.join(folder, f) for f in chosen] #store the paths so they can be used later
     return selected
 
-def choose_starts(n: int, file_path: Path, max_starts: int = MAX_STARTS, base_seed: int = BASE_SEED):
+def choose_starts(n, file_path, max_starts, base_seed = BASE_SEED):
     """
     Select up to MAX_STARTS distinct start cities for an instance. If the number of cities is less than or equal to MAX_STARTS, all start cities are used.
 
@@ -105,14 +105,28 @@ def get_stats(costs):
     cv_cost = std_cost / mean_cost if mean_cost > 0 else 0.0 #prevents division by 0
     return min_cost, mean_cost, std_cost, cv_cost
 
-def scatter_xy(fig_path: Path, xs: np.ndarray, ys: np.ndarray, title: str):
+def scatter_xy(fig_path, xs, ys, title):
     """
     Make a scatter plot with x = GRASPed Insertion cost (before 2-opt) and y = GRASPed Insertion+2-opt cost
+    
+    Parameters
+    ----------
+    path : Path
+        output file path where the figure will be saved
+    xs : list or array-like of float
+        objective values before applying local search
+    ys : list or array-like of float
+        objective values after applying local search
+    title : str
+        title for the scatter plot
     """
     plt.figure(figsize=(7.5, 5.5), dpi=140)
     plt.scatter(xs, ys, s=22, facecolors="none", edgecolors="#1f77b4", linewidths=1.0)
+
+    #add diagonal line (y=x) to indicate no improvement
     lo, hi = min(xs.min(), ys.min()), max(xs.max(), ys.max())
-    plt.plot([lo, hi], [lo, hi], "--", color="gray", linewidth=1)  # y=x reference
+    plt.plot([lo, hi], [lo, hi], "--", color="gray", linewidth=1) 
+    
     plt.xlabel("Constructive heuristic - GRASPed Insertion cost (before 2-opt)")
     plt.ylabel("After local search - GRASPed Insertion + 2-opt cost")
     plt.title(title)
@@ -120,7 +134,7 @@ def scatter_xy(fig_path: Path, xs: np.ndarray, ys: np.ndarray, title: str):
     plt.savefig(fig_path)
     plt.close()
 
-def run_instance(file_path: Path):
+def run_instance(file_path, max_starts):
     """
     Run GRASPed Insertion and GRASPed Insertion + 2-opt on a single instance for multiple start cities, returning the per-start costs before and after local search.
 
@@ -138,7 +152,7 @@ def run_instance(file_path: Path):
     tsp = TSP(str(file_path))
     n = tsp.nCities
 
-    starts = choose_starts(n, file_path) #get list of start cities
+    starts = choose_starts(n, file_path, max_starts=max_starts, base_seed=BASE_SEED) #get list of start cities
     base = (hash(file_path.as_posix()) ^ (ALPHA * 1009) ^ BASE_SEED) & 0xFFFFFFFF #use seed for the instance and alpha and vary by start index for reproducibility
 
     before_costs, after_costs = [], []
@@ -162,34 +176,49 @@ def main():
     Main entry point. Selects 5 small, 3 medium, and 2 large instances reproducibly, runs GRASPed Insertion and GRASPed Insertion + 2-opt with up to MAX_STARTS starts per instance, saves a scatter per instance, and prints a summary results table.
     """
     picked = select_instances()  
-    instance_paths = picked["Small"] + picked["Medium"] + picked["Large"]
 
     #run the GRASPed insertion/2-opt for the instances, save figures, and collect the statistics
     rows = []
-    for fpath in instance_paths:
-        fpath = Path(fpath)
-        print(f"Running {fpath} …")
-        xs, ys = run_instance(fpath)
+    for group, paths in picked.items():                
+        for f in paths:
+            fpath = Path(f)
+            max_starts = STARTS_BY_GROUP[group]
+            print(f"Running {fpath}")
+            xs, ys = run_instance(fpath, max_starts)
 
-        #create scatter with x=before, y=after for each instance
-        fig_path = OUT_DIR / f"{fpath.stem}_grasp2opt.png"
-        scatter_xy(fig_path, xs, ys, f"{fpath.name} — GRASP(α={ALPHA}%) + 2-opt")
+            #create scatter with x=before, y=after for each instance
+            fig_path = OUT_DIR / f"{fpath.stem}_grasp2opt.png"
+            scatter_xy(fig_path, xs, ys, f"{fpath.name} — GRASP(α={ALPHA}%) + 2-opt")
 
-        min_cost, mean_cost, std_cost, cv_cost = get_stats(list(ys))
-        rows.append({
-            "Instance": fpath.name,
-            "Min. Obj.": round(float(min_cost), 2),
-            "Mean. Obj.": round(float(mean_cost), 2),
-            "St. Dev.": round(float(std_cost), 2),
-            "Cof. Var.": round(float(cv_cost), 3),
-        })
+            b_min, b_mean, b_std, b_cv = get_stats(list(xs))
+            a_min, a_mean, a_std, a_cv = get_stats(list(ys))
+
+            #create Dataframe with both before and after statistics
+            rows.append({
+                "Group": group,
+                "Instance": fpath.name,
+                "Starts": max_starts,
+
+                "Before_Min": round(float(b_min), 2),
+                "Before_Mean": round(float(b_mean), 2),
+                "Before_Std": round(float(b_std), 2),
+                "Before_CV": round(float(b_cv), 3),
+
+                "After_Min": round(float(a_min), 2),
+                "After_Mean": round(float(a_mean), 2),
+                "After_Std": round(float(a_std), 2),
+                "After_CV": round(float(a_cv), 3),
+
+                "Mean_Improvement": round(float(b_mean - a_mean), 2),
+                "Mean_Improvement_%": round(float((b_mean - a_mean) / b_mean * 100.0), 2),
+            })
 
     #convert results to a DataFrame for printing and .csv
     df = pd.DataFrame(rows)
-    print(f"\nResults Exercise 6, with {MAX_STARTS} starts and α={ALPHA}%")
+    print(f"\nResults Exercise 6 (Small=20, Medium=10, Large=5; α={ALPHA}%)")
     print(df.to_string(index=False))
-    df.to_csv(OUT_DIR / "exercise_6.csv", index=False)
-    print(f"\nSaved figures & CSV to: {OUT_DIR}/")
+    df.to_csv(OUT_DIR / "exercise_6_summary.csv", index=False)
+    print(f"\nSaved figures, per-start CSVs, and summary to: {OUT_DIR}/")
 
 if __name__ == "__main__":
     main()

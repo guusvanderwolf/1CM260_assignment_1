@@ -10,7 +10,7 @@ from pathlib import Path
 from TSP import TSP
 
 BASE_SEED = 131 
-MAX_STARTS = 10
+STARTS_BY_GROUP = {"Small": 20, "Medium": 10, "Large": 5}
 
 def select_instances(base_dir="Instances", n_small=5, n_medium=3, n_large=2, seed=BASE_SEED):
     """
@@ -19,7 +19,7 @@ def select_instances(base_dir="Instances", n_small=5, n_medium=3, n_large=2, see
     Parameters
     ----------
     base_dir : str
-        path to the base directory containing 'Small', 'Medium', and 'Large' subfolders
+        path to the base directory containing Small, Medium, and Large subfolders
     n_small : int
         number of small instances to select (default 5)
     n_medium : int
@@ -43,7 +43,7 @@ def select_instances(base_dir="Instances", n_small=5, n_medium=3, n_large=2, see
         selected[group] = [os.path.join(folder, f) for f in chosen] #store the paths so they can be used later
     return selected
 
-def choose_starts(n: int, file_path: Path, max_starts: int = MAX_STARTS, base_seed: int = BASE_SEED):
+def choose_starts(n, file_path, max_starts, base_seed = BASE_SEED):
     """
     Select up to MAX_STARTS distinct start cities for an instance. If the number of cities is less than or equal to MAX_STARTS, all start cities are used.
 
@@ -99,7 +99,7 @@ def get_stats(costs):
     cv_cost = std_cost / mean_cost if mean_cost > 0 else 0.0 #prevents division by 0
     return min_cost, mean_cost, std_cost, cv_cost
 
-def run_instance(file_path: Path):
+def run_instance(file_path, max_starts):
     """
     Run the Outlier Insertion + 2-opt heuristics on a single instance for multiple start cities
 
@@ -117,7 +117,7 @@ def run_instance(file_path: Path):
     tsp = TSP(str(file_path))
     n = tsp.nCities 
 
-    starts = choose_starts(n, file_path) #get list of start cities
+    starts = choose_starts(n, file_path, max_starts=max_starts, base_seed=BASE_SEED) #get list of start cities
 
     costs = []
     for s in starts:
@@ -133,25 +133,26 @@ def main():
     Main entry point. Selects 5 small, 3 medium, and 2 large instances reproducibly, runs the Outlier Insertion + 2 opt heuristic with up to MAX_STARTS different starts per instance, and prints a summary results table
     """
     picked = select_instances(seed=BASE_SEED)
-    instance_paths = picked["Small"] + picked["Medium"] + picked["Large"]
 
     #run the Outlier Insertion + 2 opt heuristic for the instances and collect the statistics
     rows = []
-    for fpath in instance_paths:
-        fpath = Path(fpath)
-        print(f"Running {fpath}...")
-        min_cost, mean_cost, std_cost, cv_cost = run_instance(fpath)
-        rows.append({
-            "Instance": fpath.name,
-            "Min. Obj.": round(float(min_cost), 2),
-            "Mean. Obj.": round(float(mean_cost), 2),
-            "St. Dev.": round(float(std_cost), 2),
-            "Cof. Var.": round(float(cv_cost), 3),
-        })
+    for group, paths in picked.items():
+        for f in paths:
+            fpath = Path(f)
+            print(f"Running {fpath}")
+            max_starts = STARTS_BY_GROUP[group] 
+            min_cost, mean_cost, std_cost, cv_cost = run_instance(fpath, max_starts)
+            rows.append({
+                "Instance": fpath.name,
+                "Min. Obj.": round(float(min_cost), 2),
+                "Mean. Obj.": round(float(mean_cost), 2),
+                "St. Dev.": round(float(std_cost), 2),
+                "Cof. Var.": round(float(cv_cost), 3),
+            })
 
     #convert results to a DataFrame for printing and .csv
     df = pd.DataFrame(rows)
-    print(f"\nResults Exercise 5, with {MAX_STARTS} starts")
+    print(f"\nResults Exercise 5, with Small 20, Medium 10, Large 5 starts")
     print(df.to_string(index=False))
     df.to_csv("exercise_5.csv", index=False)
 
